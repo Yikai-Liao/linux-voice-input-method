@@ -1,15 +1,15 @@
-from PyQt5.QtWidgets import QApplication, QWidget, QPushButton, QTextEdit
-from PyQt5.QtGui import QMouseEvent, QIcon
-from PyQt5.QtCore import QProcess, Qt, QEvent, QTimer, pyqtSignal
-from funasr_onnx import Paraformer
-from pynput import keyboard
-from pynput.keyboard import Controller, Key
+from PyQt6.QtWidgets import QApplication, QWidget, QPushButton, QTextEdit
+from PyQt6.QtGui import QMouseEvent, QIcon
+from PyQt6.QtCore import QProcess, Qt, QEvent, QTimer, pyqtSignal, QPointF
+from funasr_onnx import Paraformer, CT_Transformer
+import keyboard
 import threading
 from opencc import OpenCC
 import sounddevice as sd
 import numpy as np
 import soundfile as sf
 import subprocess
+import time
 
 def simulate_keyboard_input(text):
     for char in text:
@@ -21,7 +21,7 @@ class MyButton(QPushButton):
         self.isPressed = False
         self.pressed.connect(self.change_color)
         self.released.connect(self.restore_color)
-        self.setCursor(Qt.PointingHandCursor)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
 
     def change_color(self):
         self.setStyleSheet("background-color: rgba(90, 133, 15, 0.8);")  # Change to red when pressed
@@ -40,13 +40,13 @@ class MyButton(QPushButton):
 
     def simulatePress(self):
         if not self.isPressed:
-            pressEvent = QMouseEvent(QEvent.MouseButtonPress, self.rect().center(), Qt.LeftButton, Qt.LeftButton, Qt.NoModifier)
+            pressEvent = QMouseEvent(QEvent.Type.MouseButtonPress, QPointF(self.rect().center()), Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
             QApplication.postEvent(self, pressEvent)
             self.isPressed = True
 
     def simulateRelease(self):
         if self.isPressed:
-            releaseEvent = QMouseEvent(QEvent.MouseButtonRelease, self.rect().center(), Qt.LeftButton, Qt.LeftButton, Qt.NoModifier)
+            releaseEvent = QMouseEvent(QEvent.Type.MouseButtonRelease, QPointF(self.rect().center()), Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
             QApplication.postEvent(self, releaseEvent)
             self.isPressed = False
 
@@ -61,7 +61,7 @@ class MyWindow(QWidget):
         self.setWindowOpacity(0.8)
 
         # 设置全局热键
-        self.global_hotkey = keyboard.Key.scroll_lock
+        # self.global_hotkey = keyboard.Key.scroll_lock
 
         # Connect the signal to a slot
         self.transcription_ready.connect(self.update_transcription)
@@ -70,7 +70,7 @@ class MyWindow(QWidget):
         self.text_ready.connect(self.update_text)
 
         # 窗口置顶
-        self.setWindowFlag(Qt.WindowStaysOnTopHint, True)
+        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
 
         # 设置窗口图标
         self.setWindowIcon(QIcon('./icon.png'))
@@ -109,11 +109,13 @@ class MyWindow(QWidget):
         self.recorder = QProcess()
 
         # 初始化模型
-        model_dir = "./speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch"
-        self.model = Paraformer(model_dir, batch_size=1, quantize=True)
+        # model_dir = "./speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch"
+        self.model = Paraformer('/home/lyk/.cache/modelscope/hub/iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch', batch_size=1, quantize=True)
+        self.ct_model = CT_Transformer('/home/lyk/.cache/modelscope/hub/iic/punc_ct-transformer_cn-en-common-vocab471067-large', batch_size=1, quantize=True)
 
         # 预热模型，避免第一次推理时的延迟
         self.model(['./warmup.wav'])
+        self.ct_model("你好")
 
         # 当按钮被按下时开始录音
         self.button.pressed.connect(self.startRecording)
@@ -176,21 +178,19 @@ class MyWindow(QWidget):
     def setup_hotkey(self):
         def on_press(key):
             try:
-                if key == self.global_hotkey and not self.button.isPressed:  # Use the global_hotkey variable here
+                if not self.button.isPressed:  # Use the global_hotkey variable here
+                    print('Key pressed: {0}'.format(key))
                     self.button.simulatePress()  # 按下Scroll Lock时模拟鼠标按下事件
             except AttributeError:
                 pass
 
         def on_release(key):
-            if key == self.global_hotkey and self.button.isPressed:  # Use the global_hotkey variable here
+            if self.button.isPressed:  # Use the global_hotkey variable here
+                print('Key released: {0}'.format(key))
                 self.button.simulateRelease()  # 释放Scroll Lock时模拟鼠标释放事件
 
-        # Collect events until released
-        self.listener = keyboard.Listener(
-            on_press=on_press,
-            on_release=on_release)
-        self.listener.start()
-
+        keyboard.on_press_key("scroll_lock", on_press)
+        keyboard.on_release_key("scroll_lock", on_release)
         # 设置录音的参数
         self.fs = 44100  # Sample rate
         self.channels = 2  # Number of channels
@@ -241,10 +241,16 @@ class MyWindow(QWidget):
 
     def transcribe_audio_thread(self):
         wav_path = ['./audio.wav']
+        start1 = time.time()
         result = self.model(wav_path)
+        dur1 = time.time() - start1
         print("Transcription: ", result)
         if result and 'preds' in result[0]:
             transcription = result[0]['preds'][0]
+            start2 = time.time()
+            transcription = self.ct_model(transcription)[0]
+            dur2 = time.time() - start2
+            print("Cost time in ms: ", dur1 * 1000, dur2 * 1000)
             # Emit the signal with the transcription
             self.transcription_ready.emit(transcription)
 
@@ -264,7 +270,7 @@ class MyWindow(QWidget):
 
     # 让窗口可以拖拽
     def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
+        if event.button() == Qt.MouseButton.LeftButton:
             self.dragPosition = event.globalPos() - self.frameGeometry().topLeft()
             event.accept()
 
@@ -293,4 +299,4 @@ if __name__ == "__main__":
     with open('style.css', 'r') as f:
         app.setStyleSheet(f.read())
 
-    app.exec_()
+    app.exec()
