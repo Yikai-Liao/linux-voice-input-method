@@ -10,6 +10,7 @@ import numpy as np
 import soundfile as sf
 import subprocess
 import time
+import  pyperclip
 
 def simulate_keyboard_input(text):
     for char in text:
@@ -165,8 +166,9 @@ class MyWindow(QWidget):
             self.text_ready.emit(converted)  # Emit the signal with the converted text
 
             # 将转换后的文本复制到剪贴板
-            clipboard = QApplication.clipboard()
-            clipboard.setText(converted)
+            # clipboard = QApplication.clipboard()
+            # clipboard.setText(converted)
+            pyperclip.copy(converted)
             print("Text converted")
         finally:
             # Release the lock after the conversion is done
@@ -257,14 +259,13 @@ class MyWindow(QWidget):
     def update_transcription(self, transcription):
         self.textEdit.setText(transcription)
         # 将文本复制到剪贴板
-        clipboard = QApplication.clipboard()
-        clipboard.setText(transcription)
-
+        pyperclip.copy(transcription)        
         # 模拟按下Ctrl+V
-        # keyboard = Controller()
-        # with keyboard.pressed(Key.ctrl):  # 直接使用Key.ctrl
-        #     keyboard.press('v')
-        #     keyboard.release('v')
+        keyboard.press('ctrl')
+        keyboard.press('v')
+        time.sleep(0.01)
+        keyboard.release('v')
+        keyboard.release('ctrl')
 
         simulate_keyboard_input(transcription)
 
